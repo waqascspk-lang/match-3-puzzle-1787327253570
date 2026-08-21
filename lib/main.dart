@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:async';
-import 'dart:math';
 
 class Tile {
   final String id;
@@ -78,25 +76,28 @@ class GameProvider extends ChangeNotifier {
     movesLeft = config['moves'];
     score = 0;
     selectedTile = null;
-    _initializeGrid(config['types'] as List<String>);
+    _initializeGrid(List<String>.from(config['types']));
     notifyListeners();
   }
 
   void _initializeGrid(List<String> types) {
-    grid = List.generate(6, (r) {
-      return List.generate(6, (c) {
-        String type;
-        do {
-          type = (types..shuffle())[0];
-        } while (_wouldCreateMatch(r, c, type));
-        return Tile(
+    grid = List.generate(6, (r) => List.generate(6, (c) => Tile(row: r, col: c)));
+
+    for (int r = 0; r < 6; r++) {
+      for (int c = 0; c < 6; c++) {
+        List<String> validTypes = types.where((t) => !_wouldCreateMatch(r, c, t)).toList();
+        String selectedType = validTypes.isNotEmpty
+            ? (validTypes..shuffle()).first
+            : (List<String>.from(types)..shuffle()).first;
+
+        grid[r][c] = Tile(
           id: '${r}_$c',
           row: r,
           col: c,
-          type: type,
+          type: selectedType,
         );
-      });
-    });
+      }
+    }
   }
 
   bool _wouldCreateMatch(int r, int c, String type) {
@@ -106,6 +107,8 @@ class GameProvider extends ChangeNotifier {
   }
 
   void tapTile(int r, int c) {
+    if (movesLeft <= 0 || score >= targetScore) return;
+
     Tile tappedTile = grid[r][c];
 
     if (selectedTile == null) {
@@ -114,20 +117,18 @@ class GameProvider extends ChangeNotifier {
     } else {
       int r1 = selectedTile!.row;
       int c1 = selectedTile!.col;
-      int r2 = r;
-      int c2 = c;
 
-      if ((r1 - r2).abs() + (c1 - c2).abs() == 1) {
-        _swapTiles(r1, c1, r2, c2);
+      grid[r1][c1] = grid[r1][c1].copyWith(isSelected: false);
+
+      if ((r1 - r).abs() + (c1 - c).abs() == 1) {
+        _swapTiles(r1, c1, r, c);
         if (checkAndClearMatches()) {
           movesLeft--;
           _processCascades();
         } else {
-          _swapTiles(r1, c1, r2, c2);
+          _swapTiles(r1, c1, r, c);
         }
       }
-      
-      grid[r1][c1] = grid[r1][c1].copyWith(isSelected: false);
       selectedTile = null;
     }
     notifyListeners();
@@ -145,20 +146,20 @@ class GameProvider extends ChangeNotifier {
 
     for (int r = 0; r < 6; r++) {
       for (int c = 0; c < 4; c++) {
-        if (grid[r][c].type == grid[r][c + 1].type && grid[r][c].type == grid[r][c + 2].type) {
-          matchedIds.add('${r}_$c');
-          matchedIds.add('${r}_${c + 1}');
-          matchedIds.add('${r}_${c + 2}');
+        if (grid[r][c].type != 'EMPTY' &&
+            grid[r][c].type == grid[r][c + 1].type &&
+            grid[r][c].type == grid[r][c + 2].type) {
+          matchedIds.addAll(['${r}_$c', '${r}_${c + 1}', '${r}_${c + 2}']);
         }
       }
     }
 
     for (int c = 0; c < 6; c++) {
       for (int r = 0; r < 4; r++) {
-        if (grid[r][c].type == grid[r + 1][c].type && grid[r][c].type == grid[r + 2][c].type) {
-          matchedIds.add('${r}_$c');
-          matchedIds.add('${r + 1}_$c');
-          matchedIds.add('${r + 2}_$c');
+        if (grid[r][c].type != 'EMPTY' &&
+            grid[r][c].type == grid[r + 1][c].type &&
+            grid[r][c].type == grid[r + 2][c].type) {
+          matchedIds.addAll(['${r}_$c', '${r + 1}_$c', '${r + 2}_$c']);
         }
       }
     }
@@ -177,15 +178,16 @@ class GameProvider extends ChangeNotifier {
   }
 
   void _processCascades() {
-    bool hasMatches;
-    do {
+    int maxCascadeDepth = 10;
+    while (maxCascadeDepth > 0) {
       dropAndRefill();
-      hasMatches = checkAndClearMatches();
-    } while (hasMatches);
+      if (!checkAndClearMatches()) break;
+      maxCascadeDepth--;
+    }
   }
 
   void dropAndRefill() {
-    final types = levelConfigs[currentLevel]!['types'] as List<String>;
+    final types = List<String>.from(levelConfigs[currentLevel]!['types']);
 
     for (int c = 0; c < 6; c++) {
       List<String> columnTypes = [];
@@ -196,7 +198,7 @@ class GameProvider extends ChangeNotifier {
       }
 
       while (columnTypes.length < 6) {
-        columnTypes.add((types..shuffle())[0]);
+        columnTypes.add((List<String>.from(types)..shuffle()).first);
       }
 
       for (int r = 5; r >= 0; r--) {
@@ -205,12 +207,10 @@ class GameProvider extends ChangeNotifier {
     }
   }
 
-  void restartLevel() {
-    startLevel(currentLevel);
-  }
+  void restartLevel() => startLevel(currentLevel);
 
   void nextLevel() {
-    if (currentLevel < 4) {
+    if (currentLevel < levelConfigs.length - 1) {
       startLevel(currentLevel + 1);
     }
   }
@@ -283,8 +283,10 @@ class LevelSelectScreen extends StatelessWidget {
 }
 
 class GamePlayScreen extends StatefulWidget {
+  const GamePlayScreen({super.key});
+
   @override
-  _GamePlayScreenState createState() => _GamePlayScreenState();
+  State<GamePlayScreen> createState() => _GamePlayScreenState();
 }
 
 class _GamePlayScreenState extends State<GamePlayScreen> {
@@ -298,39 +300,39 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         return AlertDialog(
           title: Text(
             won ? 'Level Passed!' : 'Out of Moves!',
-            style: TextStyle(fontWeight: FontWeight.w700),
+            style: const TextStyle(fontWeight: FontWeight.w700),
           ),
           content: Text(
-            won 
-              ? 'Congratulations! You reached the target score.' 
-              : 'You ran out of moves before hitting the target.',
-            style: TextStyle(fontWeight: FontWeight.w400),
+            won
+                ? 'Congratulations! You reached the target score.'
+                : 'You ran out of moves before hitting the target.',
+            style: const TextStyle(fontWeight: FontWeight.w400),
           ),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
                 context.read<GameProvider>().restartLevel();
-                setState(() => _dialogShowing = false);
+                _dialogShowing = false;
               },
-              child: Text('Retry', style: TextStyle(fontWeight: FontWeight.w500)),
+              child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w500)),
             ),
             if (won)
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
                   context.read<GameProvider>().nextLevel();
-                  setState(() => _dialogShowing = false);
+                  _dialogShowing = false;
                 },
-                child: Text('Next Level', style: TextStyle(fontWeight: FontWeight.w500)),
+                child: const Text('Next Level', style: TextStyle(fontWeight: FontWeight.w500)),
               ),
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
                 Navigator.of(context).pushReplacementNamed('/');
-                setState(() => _dialogShowing = false);
+                _dialogShowing = false;
               },
-              child: Text('Exit', style: TextStyle(fontWeight: FontWeight.w500)),
+              child: const Text('Exit', style: TextStyle(fontWeight: FontWeight.w500)),
             ),
           ],
         );
@@ -342,14 +344,17 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   Widget build(BuildContext context) {
     return Consumer<GameProvider>(
       builder: (context, provider, child) {
-        // Check game state for dialogs
         if (!_dialogShowing) {
           if (provider.score >= provider.targetScore) {
             _dialogShowing = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) => _showResultDialog(context, true));
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _showResultDialog(context, true);
+            });
           } else if (provider.movesLeft <= 0) {
             _dialogShowing = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) => _showResultDialog(context, false));
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _showResultDialog(context, false);
+            });
           }
         }
 
@@ -357,14 +362,14 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
           appBar: AppBar(
             title: Text(
               'Level ${provider.currentLevel + 1}',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             centerTitle: true,
           ),
           body: Column(
             children: [
               Container(
-                padding: EdgeInsets.all(20),
+                padding: const EdgeInsets.all(20),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -381,9 +386,9 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                     child: AspectRatio(
                       aspectRatio: 1.0,
                       child: GridView.builder(
-                        physics: NeverScrollableScrollPhysics(),
+                        physics: const NeverScrollableScrollPhysics(),
                         itemCount: 36,
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 6,
                           crossAxisSpacing: 4,
                           mainAxisSpacing: 4,
@@ -392,14 +397,15 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                           int r = index ~/ 6;
                           int c = index % 6;
                           Tile tile = provider.grid[r][c];
-                          
+
                           return GestureDetector(
                             onTap: () => provider.tapTile(r, c),
-                            child: Container(
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
                               decoration: BoxDecoration(
-                                color: tile.isSelected 
-                                    ? Colors.blue.withOpacity(0.3) 
-                                    : Colors.grey.withOpacity(0.1),
+                                color: tile.isSelected
+                                    ? Colors.blue.withAlpha(76)
+                                    : Colors.grey.withAlpha(25),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
                                   color: tile.isSelected ? Colors.blue : Colors.transparent,
@@ -409,7 +415,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                               child: Center(
                                 child: Text(
                                   tile.type == 'EMPTY' ? '' : tile.type,
-                                  style: TextStyle(fontSize: 28),
+                                  style: const TextStyle(fontSize: 28),
                                 ),
                               ),
                             ),
@@ -432,7 +438,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       children: [
         Text(
           label,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w400,
             color: Colors.grey,
@@ -440,7 +446,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         ),
         Text(
           value,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -473,7 +479,7 @@ class MyApp extends StatelessWidget {
           return MaterialPageRoute(builder: (context) => const LevelSelectScreen());
         }
         if (settings.name == '/gamePlay') {
-          return MaterialPageRoute(builder: (context) => GamePlayScreen());
+          return MaterialPageRoute(builder: (context) => const GamePlayScreen());
         }
         return null;
       },
