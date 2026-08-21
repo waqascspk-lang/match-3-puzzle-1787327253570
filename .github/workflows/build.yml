@@ -1,0 +1,136 @@
+name: Build Flutter App
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    env:
+      APP_ID: PgLUJZQ6i4mCDvm9Xz6Q
+      APPETIZE_TOKEN: tok_fqshwrxabzxu2qfggprrnovapm
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      - name: Install dependencies
+        run: flutter clean && flutter pub get
+      
+      - name: Build APK
+        run: flutter build apk --debug
+      
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Push APK to branch
+        if: env.APP_ID != ''
+        run: |
+          git config user.name "appforge-bot"
+          git config user.email "bot@appforge.io"
+          git checkout --orphan apk-branch
+          git rm -rf . || true
+          cp build/app/outputs/flutter-apk/app-debug.apk ./app-debug.apk
+          git add app-debug.apk
+          git commit -m "Update debug APK"
+          git branch -D apk 2>/dev/null || true
+          git branch -m apk
+          git push origin apk --force
+
+      - name: Upload to Appetize.io
+        if: env.APP_ID != ''
+        run: |
+          sleep 5
+          APK_URL="https://github.com/${{ github.repository }}/raw/apk/app-debug.apk"
+          echo "Uploading APK from: $APK_URL"
+          RESPONSE=$(curl -s -X POST "https://api.appetize.io/v1/apps" \
+            -H "X-API-KEY: $APPETIZE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"$APK_URL\", \"platform\": \"android\", \"note\": \"Auto-uploaded from CI\"}")
+          echo "Appetize response: $RESPONSE"
+          PUBLIC_KEY=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('publicKey',''))" 2>/dev/null || echo "")
+          if [ -n "$PUBLIC_KEY" ]; then
+            CALLBACK_URL="https://appetizecallback-5zjufzlzeq-uc.a.run.app"
+            curl -s -X POST "$CALLBACK_URL" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $APPETIZE_TOKEN" \
+              -d "{\"appId\": \"$APP_ID\", \"publicKey\": \"$PUBLIC_KEY\"}"
+            echo "Uploaded to Appetize.io: $PUBLIC_KEY"
+          else
+            echo "Appetize.io upload failed"
+          fi
+
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      - name: Disable Swift Package Manager
+        run: flutter config --no-enable-swift-package-manager
+      
+      - name: Clean and get dependencies
+        run: flutter clean && flutter pub get
+      
+      - name: Build iOS Simulator
+        run: flutter build ios --debug --simulator
+      
+      - name: Upload iOS Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator
+          path: build/ios/iphonesimulator/Runner.app
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      - name: Install dependencies
+        run: flutter clean && flutter pub get
+      
+      - name: Build Web
+        run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+      
+      - name: Upload Web Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: build/web
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
+          publish_branch: gh-pages

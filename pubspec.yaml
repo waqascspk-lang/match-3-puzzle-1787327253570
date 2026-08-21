@@ -1,0 +1,22 @@
+name: 'match_3_puzzle'
+description: 'A match 3 puzzle game'
+publish_to: 'none'
+version: '1.0.0+1'
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: '^6.1.2'
+  google_fonts: '^6.1.0'
+  intl: '^0.19.0'
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: '^3.0.0'
+
+flutter:
+  uses-material-design: true
